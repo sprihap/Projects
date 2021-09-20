@@ -1,0 +1,517 @@
+---
+title: "Data science community analysis"
+#author: "Spriha Awasthi"
+date: "9/18/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# Problem Statement
+
+The purpose of this project is to analyse the data science community in following parameters:
+
+1. Gender diversity in the data science and related fields
+2. Compensation distribution for different job profiles in recent years
+3. Level of education in different job descriptions across years
+4. Importance of coding experience in compensation
+
+We have used the *Kaggle Machine Learning & Data Science Survey* as data sets. The data sets are available from 2017-20 and contain more than 200 columns each year with more than 15000 respondents each year.\
+
+```{r, echo = TRUE}
+base_url <- "https://raw.githubusercontent.com/sprihap/KaggleDatasets/master/"
+survey_urls <- str_c(base_url, c("kaggle-survey-2017/multipleChoiceResponses.csv", 
+                                 "kaggle-survey-2018/multipleChoiceResponses.csv",
+                                 "kaggle-survey-2019/multiple_choice_responses.csv",
+                                 "kaggle-survey-2020/kaggle_survey_2020_responses.csv"))
+
+data_2017 <- read.csv(survey_urls[1], header = TRUE, 
+                      check.names = FALSE, stringsAsFactors = FALSE)
+data_2018 <- read.csv(survey_urls[2], header = TRUE, 
+                      check.names = FALSE, stringsAsFactors = FALSE)
+data_2019 <- read.csv(survey_urls[3], header = TRUE, 
+                      check.names = FALSE, stringsAsFactors = FALSE)
+data_2020 <- read.csv(survey_urls[4], header = TRUE, 
+                      check.names = FALSE, stringsAsFactors = FALSE)
+```
+
+Below we load the datasets as tibbles and print their dimensions.\
+
+```{r, echo = TRUE}
+nrow(data_2017)
+ncol(data_2017)
+nrow(data_2018)
+ncol(data_2018)
+nrow(data_2019)
+ncol(data_2019)
+nrow(data_2020)
+ncol(data_2020)
+```
+
+The data set is not consistent across years and needs careful analysis to clean and extract data relevant to our problem statement. Description of each column for years is available at our hosted datasets on github at *https://github.com/sprihap/KaggleDatasets*.\
+
+### 1. Gender diversity across the years
+
+To analyze the gender diversity we can equate the percentage of participants as proportional to gender. We do this by using the corresponding columns in each year below.\
+
+```{r, echo = TRUE}
+gender_2017 <- data_2017 %>% rename(gender = GenderSelect) %>% 
+  group_by(gender) %>% summarize(Y2017 = n()) %>% ungroup() %>%
+  mutate(Y2017 = (Y2017 * 100) / sum(Y2017))
+gender_2018 <- data_2018[-c(1),] %>% rename(gender = Q1) %>% 
+  group_by(gender) %>% summarize(Y2018 = n()) %>% ungroup()%>%
+  mutate(Y2018 = (Y2018 * 100) / sum(Y2018))
+gender_2019 <- data_2019[-c(1),] %>% rename(gender = Q2) %>% 
+  group_by(gender) %>% summarize(Y2019 = n()) %>% ungroup()%>%
+  mutate(Y2019 = (Y2019 * 100) / sum(Y2019))
+gender_2020 <- data_2020[-c(1),] %>% rename(gender = Q2) %>% 
+  group_by(gender) %>% summarize(Y2020 = n()) %>% ungroup()%>%
+  mutate(Y2020 = (Y2020 * 100) / sum(Y2020))
+
+```
+```{r, echo = TRUE}
+# Make some renaming to map to same values
+gender_2017 <- gender_2017 %>% 
+  mutate(gender = case_when(
+    gender == "Non-binary, genderqueer, or gender non-conforming" ~ "Nonbinary",
+    gender == "A different identity" ~ "Prefer to self-describe",
+    gender == "" ~ "Prefer not to say",
+    TRUE ~ gender
+  ))
+```
+```{r, echo = TRUE}
+gender_2020 <- gender_2020 %>%
+  mutate_at("gender", str_replace, "Man", "Male") %>%
+  mutate_at("gender", str_replace, "Woman", "Female")
+```
+```{r, echo = TRUE}
+gender <- gender_2017 %>% 
+  full_join(gender_2018) %>% 
+  full_join(gender_2019) %>% 
+  full_join(gender_2020)
+```
+```{r, echo = TRUE}
+gender <- gender %>%
+  pivot_longer(cols = c(Y2017, Y2018, Y2019, Y2020),
+               names_to = "year",
+               values_to = "percent") %>%
+  mutate(year = factor(year), gender = factor(gender))
+```
+
+Below we plot the the histogram of the distribution and compare the percentage of males across the years.
+
+```{r, echo=TRUE}
+ggplot(data=gender, aes(x = year, y = percent, fill = gender)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Pastel2") +
+  geom_text(aes(label = round(percent, 1)), vjust = -0.2, size = 3,
+            position = position_dodge(0.9))
+```
+
+### 2. Compensation changes across the years
+
+Let us first try to extract the compensation of different roles in each year. This needs a significant effort on understanding the data and mapping the columns form each year to a consistent schema that we can read and analyse. We are going to focus on people who report their earnings in USD (2017 Survey) or are living in US (2018-20 Surveys).\
+
+This study introduces the following challenges that we have tackled in our code:
+
+1. The surveys started in 2017 aren't consistent across years. Each year columns change for different attributes.
+2. Each year the expected responses are also different and needs different processing / filtering strategies.
+3. Compensation in 2017 was collected as an absolute number but in later years was converted to a bucket selection mechanism.
+
+To handles these we carefully analyze each year column and try different techniques to reach a consistent data for jobs and compensations. We also use the average of buckets as expectated compensation for comparisons. For buckets with no upper limit we assume 1.5 times the upper value for average.\
+
+For comparing different job categories across years we will consider the following categories:
+
+1. Data/Business Analyst
+2. Data Scientist
+3. Machine Learning Engineer
+4. Software Engineer
+5. Others (which includes consultants, students, statistician etc.)
+
+We also map education level by their degree name to consistent strings. The original values in data contain special characters which need to be transformed for comparison and analysis.\
+
+```{r, echo=TRUE}
+
+comp_2017 <- data_2017 %>%
+  filter((CompensationCurrency == "USD") & 
+           (!is.na(CompensationAmount)) & 
+           (CompensationAmount != "") & 
+           (CompensationAmount != "-") & 
+           (str_length(CurrentJobTitleSelect) > 0)) %>%
+  mutate(Compensation = as.numeric(str_replace_all(CompensationAmount, ",", "")), 
+         Degree = FormalEducation, 
+         Major = MajorSelect, 
+         Job = CurrentJobTitleSelect,
+         CodingDuration = Tenure,
+         JobCategory = case_when(
+           Job %in% c("Business Analyst", "Data Analyst") ~ "Analyst",
+           Job == "Data Scientist" ~ "Data Scientist",
+           Job == "Machine Learning Engineer" ~ "ML Engineer",
+           Job == "Software Developer/Software Engineer" ~ "SW Engineer",
+           TRUE ~ "Other"
+         ),
+         EducationLevel = case_when(
+           str_detect(Degree, "Bachelor.*") ~ "Bachelors",
+           str_detect(Degree, "Master.*") ~ "Masters",
+           Degree == "Doctoral degree" ~ "PhD",
+           str_detect(Degree, "I did not complete.*") ~ "Unfinished college", 
+           str_detect(
+             Degree, "Some college/university study without.*") ~ "Unfinished college",
+           Degree == "Professional degree" ~ "Professional Degree",
+           Degree == "I prefer not to answer" ~ "Unknown",
+           TRUE ~ Degree
+         )) %>%
+  select(Job, JobCategory, Degree, EducationLevel, Major, 
+         CodingDuration, Compensation) %>%
+  filter(Compensation > 0)
+
+summary(comp_2017)
+
+```
+
+We see above some outliers of reported income in USD of 9,999,999 and 2,500,000 which needs to be cleaned up.\
+
+```{r, echo = TRUE}
+comp_2017 <- comp_2017 %>% filter(Compensation < 2000000)
+
+comp_2018 <- data_2018[-c(1),] %>%
+  filter((Q9 != "") & 
+           (Q9 != "I do not wish to disclose my approximate yearly compensation") &
+           (Q3 == "United States of America")) %>%
+  mutate(Job = Q6,
+         Degree = Q4, 
+         Major = Q5,
+         Q9 = str_replace_all(Q9, ",|\\+", ""), # Filter the characters to split
+         CompensationRange = Q9,
+         CodingDuration = Q24,
+         JobCategory = case_when(
+           Job %in% c("Business Analyst", "Data Analyst") ~ "Analyst",
+           Job == "Data Scientist" ~ "Data Scientist",
+           Job == "Machine Learning Engineer" ~ "ML Engineer",
+           Job == "Software Engineer" ~ "SW Engineer",
+           TRUE ~ "Other"
+         ),
+         EducationLevel = case_when(
+           str_detect(Degree, "Bachelor.*") ~ "Bachelors",
+           str_detect(Degree, "Master.*") ~ "Masters",
+           Degree == "Doctoral degree" ~ "PhD",
+           Degree == "No formal education past high school" ~ "Unfinished college" ,
+           str_detect(
+             Degree, "Some college/university study without.*") ~ "Unfinished college",
+           Degree == "Professional degree" ~ "Professional Degree",
+           Degree == "I prefer not to answer" ~ "Unknown",
+           TRUE ~ Degree
+         )) %>%
+  separate(Q9, c("MinComp", "MaxComp"), "-") %>%
+  select(Job, JobCategory, Degree, EducationLevel, Major, CodingDuration,
+         CompensationRange, MinComp, MaxComp) %>%
+  mutate(MinComp = as.numeric(MinComp), 
+         MaxComp = as.numeric(MaxComp), 
+         AvgComp = case_when(
+           is.na(MaxComp) ~ 1.5 * MinComp,
+           TRUE ~ (MinComp + MaxComp)/2
+         )) 
+
+summary(comp_2018)
+
+comp_2019 <- data_2019[-c(1),] %>%
+  filter((Q10 != "") & 
+           (Q10 != "I do not wish to disclose my approximate yearly compensation") & 
+           (Q3 == "United States of America")) %>%
+  mutate(Job = Q5, 
+         Degree = Q4, 
+         Q10 = str_replace_all(Q10, "\\$|>|,|\\+|( )+", ""), # Filter again to split
+         CompensationRange = Q10,
+         CodingDuration = Q15,
+         JobCategory = case_when(
+           Job %in% c("Business Analyst", "Data Analyst") ~ "Analyst",
+           Job == "Data Scientist" ~ "Data Scientist",
+           Job == "Machine Learning Engineer" ~ "ML Engineer",
+           Job == "Software Engineer" ~ "SW Engineer",
+           TRUE ~ "Other"
+         ),
+         EducationLevel = case_when(
+           str_detect(Degree, "Bachelor.*") ~ "Bachelors",
+           str_detect(Degree, "Master.*") ~ "Masters",
+           Degree == "Doctoral degree" ~ "PhD",
+           Degree == "No formal education past high school" ~ "Unfinished college" ,
+           str_detect(
+             Degree, "Some college/university study without.*") ~ "Unfinished college",
+           Degree == "Professional degree" ~ "Professional Degree",
+           Degree == "I prefer not to answer" ~ "Unknown",
+           TRUE ~ Degree
+         )) %>%
+  separate(Q10, c("MinComp", "MaxComp"), "-") %>%
+  select(Job, JobCategory, Degree, EducationLevel, CodingDuration,
+         CompensationRange, MinComp, MaxComp) %>%
+  mutate(MinComp = as.numeric(MinComp), 
+         MaxComp = as.numeric(MaxComp), 
+         AvgComp = case_when(
+           is.na(MaxComp) ~ 1.5 * MinComp,
+           TRUE ~ (MinComp + MaxComp)/2
+         ))
+
+summary(comp_2019)
+
+comp_2020 <- data_2020[-c(1),] %>%
+  filter((Q24 != "") & 
+           (Q24 != "I do not wish to disclose my approximate yearly compensation") &
+           (Q3 == "United States of America")) %>%
+  mutate(Job = Q5, 
+         Degree = Q4,
+         Q24 = str_replace_all(Q24, "\\$|>|,|\\+|( )+", ""),
+         CompensationRange = Q24,
+         CodingDuration = Q6,
+         JobCategory = case_when(
+           Job %in% c("Business Analyst", "Data Analyst") ~ "Analyst",
+           Job == "Data Scientist" ~ "Data Scientist",
+           Job == "Machine Learning Engineer" ~ "ML Engineer",
+           Job == "Software Engineer" ~ "SW Engineer",
+           TRUE ~ "Other"
+         ),
+         EducationLevel = case_when(
+           str_detect(Degree, "Bachelor.*") ~ "Bachelors",
+           str_detect(Degree, "Master.*") ~ "Masters",
+           Degree == "Doctoral degree" ~ "PhD",
+           Degree == "No formal education past high school" ~ "Unfinished college" ,
+           str_detect(
+             Degree, "Some college/university study without.*") ~ "Unfinished college",
+           Degree == "Professional degree" ~ "Professional Degree",
+           Degree == "I prefer not to answer" ~ "Unknown",
+           TRUE ~ Degree
+         )) %>%
+  separate(Q24, c("MinComp", "MaxComp"), "-") %>%
+  select(Job, JobCategory, Degree, EducationLevel, CodingDuration,
+         CompensationRange, MinComp, MaxComp) %>%
+  mutate(MinComp = as.numeric(MinComp), 
+         MaxComp = as.numeric(MaxComp), 
+         AvgComp = case_when(
+           is.na(MaxComp) ~ 1.5 * MinComp,
+           TRUE ~ (MinComp + MaxComp)/2
+         ))
+
+summary(comp_2020)
+```
+
+Now that we have the data in readable columns and formats we can go ahead and plot some visualizations to gain some insights. Let us focus on compensation by job and filter out statistics by grouping on that.\
+
+```{r, echo=TRUE}
+comp_by_job_2017 <- comp_2017 %>% 
+  group_by(JobCategory) %>% 
+  summarize(year = "2017",
+            count = n(), 
+            avgComp = mean(Compensation), 
+            minComp = min(Compensation), 
+            maxComp = max(Compensation))
+
+comp_by_job_2018 <- comp_2018 %>% 
+  group_by(JobCategory) %>% 
+  summarize(year = "2018",
+            count = n(), 
+            avgComp = mean(AvgComp), 
+            minComp = min(AvgComp), 
+            maxComp = max(AvgComp))
+
+# Add missing ML Engineer category
+comp_by_job_2018 <- comp_by_job_2018 %>%
+  add_row(tibble_row(year = "2018", 
+                     JobCategory = "ML Engineer",
+                     count = 0, 
+                     avgComp = 0,
+                     minComp = 0,
+                     maxComp = 0))
+
+comp_by_job_2019 <- comp_2019 %>% 
+  group_by(JobCategory) %>% 
+  summarize(year = "2019",
+            count = n(), 
+            avgComp = mean(AvgComp), 
+            minComp = min(AvgComp), 
+            maxComp = max(AvgComp))
+
+# Add missing ML Engineer category
+comp_by_job_2019 <- comp_by_job_2019 %>%
+  add_row(tibble_row(year = "2019", 
+                     JobCategory = "ML Engineer",
+                     count = 0, 
+                     avgComp = 0,
+                     minComp = 0,
+                     maxComp = 0))
+
+comp_by_job_2020 <- comp_2020 %>% 
+  group_by(JobCategory) %>% 
+  summarize(year = "2020",
+            count = n(), 
+            avgComp = mean(AvgComp), 
+            minComp = min(AvgComp), 
+            maxComp = max(AvgComp))
+
+comp_by_job <- bind_rows(comp_by_job_2017, 
+                         comp_by_job_2018, 
+                         comp_by_job_2019, 
+                         comp_by_job_2020)
+
+# Plot the graph now
+ggplot(comp_by_job, aes(x = JobCategory, y = avgComp/1000, fill = year)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  ylab("Average Compensation (in 1000 USD)") +
+  xlab("Job Category") +
+  scale_fill_brewer(palette = "Pastel1") +
+  geom_text(aes(label = round(avgComp/1000)), vjust = -0.2, size = 3,
+            position = position_dodge(0.9))
+```
+
+The above graph shows the following:
+
+1. The data for 2018 when compensation ranges were introduced for the first time was not received well and has unexpected values which are lower than usual. People have converted their salaries in USD and put in the survey. The country of origin being USA with maximum salaries in 0-10,000 is unusual.
+2. The ML Engineer related options were not given to the surveys of 2018 and 2019. However the salaries available for 2017 and 2020 shows the field is paying very well and desirable.
+3. Close the ML Engineer roles is the Data Scientist role, which has shown consistently high compensations over the years.
+4. Other fields related to data science are not paid as high. The bucket of Other category has diverse salary ranges but not significant sample size which shows lesser jobs emerging in those categories.
+
+### 3. Effect of formal education in the fields
+
+Next we analyse the trends of level of education of people working in the field. We will analyse the broad distribution and salaries for the different education levels from the data.
+
+```{r, echo = TRUE}
+
+generateEd <- function(df, jobCategory, yearVal) {
+  ndf <- df %>% 
+    filter(JobCategory == jobCategory) %>%
+    group_by(EducationLevel) %>% 
+    summarize(year = yearVal, count = n(), JobCategory = jobCategory) %>% 
+    ungroup() %>%
+    arrange(desc(EducationLevel)) %>%
+    mutate(percent = count * 100 / sum(count),
+           ypos = cumsum(percent)- 0.5*percent)
+  
+  return(ndf)
+}
+
+ed_by_year <- bind_rows(
+  generateEd(comp_2017, "Analyst", "2017"),
+  generateEd(comp_2017, "Data Scientist", "2017"),
+  generateEd(comp_2017, "ML Engineer", "2017"),
+  generateEd(comp_2017, "SW Engineer", "2017"),
+  generateEd(comp_2017, "Other", "2017"),
+  generateEd(comp_2018, "Analyst", "2018"),
+  generateEd(comp_2018, "Data Scientist", "2018"),
+  generateEd(comp_2018, "ML Engineer", "2018"),
+  generateEd(comp_2018, "SW Engineer", "2018"),
+  generateEd(comp_2018, "Other", "2018"),
+  generateEd(comp_2019, "Analyst", "2019"),
+  generateEd(comp_2019, "Data Scientist", "2019"),
+  generateEd(comp_2019, "ML Engineer", "2019"),
+  generateEd(comp_2019, "SW Engineer", "2019"),
+  generateEd(comp_2019, "Other", "2019"),
+  generateEd(comp_2020, "Analyst", "2020"),
+  generateEd(comp_2020, "Data Scientist", "2020"),
+  generateEd(comp_2020, "ML Engineer", "2020"),
+  generateEd(comp_2020, "SW Engineer", "2020"),
+  generateEd(comp_2020, "Other", "2020")
+)
+
+ggplot(data=ed_by_year, aes(x=year, y=percent, fill=EducationLevel)) +
+  geom_bar(stat="identity")+
+  geom_text(aes(y = ypos, 
+                label = case_when(
+                  percent > 2 ~ sprintf("%.1f", round(percent, 1)),
+                  TRUE ~ ""
+                )), color = "black", size = 2) +
+  scale_fill_brewer(palette = "Pastel1") +
+  facet_wrap(JobCategory ~ ., nrow = 1, ncol = 5) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(size=8, angle=45),
+        axis.text.y = element_text(size=8, angle=45))
+```
+
+From the results above we see that:
+
+1. The industry is predominantly filled with people with Bachelors or above education.
+2. The maximum degree holders have Master's degree and for the roles of Data Scientist, ML Engineer or Other related fields (Research Scientist, Statistician, etc) there is a higher percentage of PhDs. This shows the need for Masters or PhD to be useful in the field.
+3. The number of people with unfinished college degrees is highest for software engineering and lowest for Data Scientist positions.
+
+All these clearly establish the utility of higher education being popular for pursuing data science and related fields.
+
+# Part 4: Predict compensation vs year of coding experience
+
+We will try to show how important coding experience is for different job categories by building a linear model of years of coding experience and compensation respectively. As both were collected as intervals we are going to assume a gaussian between each interval and map it to mid point on real line. This is an approximation to get a general trend and is understandably not a rigid predictor.
+
+First, we will generate the compensations and coding experiences from previously generated *comp_20XX* data frames. We will only consider people who are working and earning for modeling purposes.\
+
+```{r, echo = TRUE}
+codingDurationApproximation <- function(range) {
+  value <- case_when(
+    range %in% c("Less than a year", "< 1 year", "< 1 years") ~ 0.5,
+    range %in% c("1 to 2 years", "1-2 years") ~ 1.5,
+    range %in% c("3 to 5 years", "3-5 years") ~ 4,
+    range == "5-10 years" ~ 7.5,
+    range == "6 to 10 years" ~ 8,
+    range == "More than 10 years" ~ 12.5,
+    range == "10-20 years" ~ 15,
+    range == "20+ years" ~ 22.5,
+    range == "20-30 years" ~ 25,
+    range == "30-40 years" ~ 35,
+    range == "40+ years" ~ 42.5,
+    TRUE ~ 0
+  )
+  
+  return(value)
+}
+
+coding_comp_2017 <- comp_2017 %>% 
+  mutate(year = "2017", 
+         CodingApprox = codingDurationApproximation(CodingDuration), 
+         AvgComp = Compensation) %>% 
+  filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
+  select(JobCategory, CodingApprox, AvgComp, year)
+coding_comp_2018 <- comp_2018 %>% 
+  mutate(year = "2018", 
+         CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
+  filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
+  select(JobCategory, CodingApprox, AvgComp, year)
+coding_comp_2019 <- comp_2019 %>% 
+  mutate(year = "2019", 
+         CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
+  filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
+  select(JobCategory, CodingApprox, AvgComp, year)
+coding_comp_2020 <- comp_2020 %>%
+  mutate(year = "2020", 
+         CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
+  filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
+  select(JobCategory, CodingApprox, AvgComp, year)
+
+# Bind all rows from years before building linear models
+coding_comp <- bind_rows(coding_comp_2017, 
+                         coding_comp_2018, 
+                         coding_comp_2019, 
+                         coding_comp_2020)
+
+buildModelAndPredict <- function(df, jobCategory) {
+  dfjc <- df %>% filter(JobCategory == jobCategory)  
+  fit  <- lm(AvgComp ~ CodingApprox, data = dfjc)
+  dfjc <- dfjc %>% 
+    mutate(pred = predict(fit))
+  
+  return(dfjc)
+}
+
+dfjcs <- bind_rows(buildModelAndPredict(coding_comp, "Analyst"),
+                   buildModelAndPredict(coding_comp, "Data Scientist"),
+                   buildModelAndPredict(coding_comp, "ML Engineer"),
+                   buildModelAndPredict(coding_comp, "SW Engineer"))
+ggplot(data = dfjcs, aes(x = CodingApprox, y = pred, color = JobCategory)) + 
+  geom_line() + xlab("Coding experience in years") + ylab("Expected compensation amount")
+
+```
+
+The grpah conclusively proves that having years of coding experience provides significant gains in career and compensation. The analysis highlights that:
+
+1. With more years of experience the compensation is expected to grow. This does not include outlier companies but on market level expectations.
+2. All ML Engineers, Data Scientists and SW Engineers start around same salaries and lowest paid are analysts in the beginning.
+3. Machine learning Engineers with more than 2-3 years experience tend to be paid higher and are highly sought after in industry.
+4. Data scientists are high earners too and earn consistently more than Software Engineers and Analysts.
+
+# Conclusion

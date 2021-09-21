@@ -7,7 +7,24 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(scales)
+library(RColorBrewer)
+library(ggthemes)
+library(ca)
+library(factoextra)
+library(viridis)
+library(ggrepel)
 library(tidyverse)
+
+# To be used for later plots
+theme_corr <- theme(legend.position = "bottom", legend.direction = "horizontal", axis.text = element_text(size = 14, colour = "gray15"), 
+                      plot.caption = element_text(color = "gray55", face = "bold", size = 9), legend.text = element_text(size = 15, colour = "gray11"),
+                      axis.title = element_text(size = 15, colour = "gray15"), legend.title = element_text(size = 14, colour = "gray5"),
+                      axis.line = element_line(size = 0.4, colour = "gray25"), panel.background = element_rect(fill = "gray91"),
+                      plot.background = element_rect(fill = "gray91"), legend.background = element_rect(fill = "gray91"),
+                      legend.key = element_rect(fill = "gray91"), plot.title = element_text(size = 19, colour = "gray15"),
+                      plot.subtitle = element_text(size = 14.5, colour = "gray42"), strip.background = element_rect(fill = "gray75"),
+                      strip.text = element_text(size = 14, colour = "gray25", face = "bold"), panel.grid.major = element_line(colour = "gray95"))
 ```
 
 # Problem Statement
@@ -18,6 +35,7 @@ The purpose of this project is to analyse the data science community in followin
 2. Compensation distribution for different job profiles in recent years
 3. Level of education in different job descriptions across years
 4. Importance of coding experience in compensation
+5. What programming languages are used by different jobs?
 
 We have used the *Kaggle Machine Learning & Data Science Survey* as data sets. The data sets are available from 2017-20 and contain more than 200 columns each year with more than 15000 respondents each year.\
 
@@ -28,14 +46,14 @@ survey_urls <- str_c(base_url, c("kaggle-survey-2017/multipleChoiceResponses.csv
                                  "kaggle-survey-2019/multiple_choice_responses.csv",
                                  "kaggle-survey-2020/kaggle_survey_2020_responses.csv"))
 
-data_2017 <- read.csv(survey_urls[1], header = TRUE, 
-                      check.names = FALSE, stringsAsFactors = FALSE)
-data_2018 <- read.csv(survey_urls[2], header = TRUE, 
-                      check.names = FALSE, stringsAsFactors = FALSE)
-data_2019 <- read.csv(survey_urls[3], header = TRUE, 
-                      check.names = FALSE, stringsAsFactors = FALSE)
-data_2020 <- read.csv(survey_urls[4], header = TRUE, 
-                      check.names = FALSE, stringsAsFactors = FALSE)
+data_2017 = read.csv(survey_urls[1], header = TRUE,
+                     check.names = FALSE, stringsAsFactors = FALSE)
+data_2018 = read.csv(survey_urls[2], header = TRUE,
+                     check.names = FALSE, stringsAsFactors = FALSE)
+data_2019 = read.csv(survey_urls[3], header = TRUE,
+                     check.names = FALSE, stringsAsFactors = FALSE)
+data_2020 = read.csv(survey_urls[4], header = TRUE,
+                     check.names = FALSE, stringsAsFactors = FALSE)
 ```
 
 Below we load the datasets as tibbles and print their dimensions.\
@@ -71,9 +89,7 @@ gender_2020 <- data_2020[-c(1),] %>% rename(gender = Q2) %>%
   group_by(gender) %>% summarize(Y2020 = n()) %>% ungroup()%>%
   mutate(Y2020 = (Y2020 * 100) / sum(Y2020))
 
-```
-```{r, echo = TRUE}
-# Make some renaming to map to same values
+# Make some renamings to map to same values
 gender_2017 <- gender_2017 %>% 
   mutate(gender = case_when(
     gender == "Non-binary, genderqueer, or gender non-conforming" ~ "Nonbinary",
@@ -81,19 +97,16 @@ gender_2017 <- gender_2017 %>%
     gender == "" ~ "Prefer not to say",
     TRUE ~ gender
   ))
-```
-```{r, echo = TRUE}
+
 gender_2020 <- gender_2020 %>%
   mutate_at("gender", str_replace, "Man", "Male") %>%
   mutate_at("gender", str_replace, "Woman", "Female")
-```
-```{r, echo = TRUE}
+
 gender <- gender_2017 %>% 
   full_join(gender_2018) %>% 
   full_join(gender_2019) %>% 
   full_join(gender_2020)
-```
-```{r, echo = TRUE}
+
 gender <- gender %>%
   pivot_longer(cols = c(Y2017, Y2018, Y2019, Y2020),
                names_to = "year",
@@ -255,7 +268,11 @@ comp_2019 <- data_2019[-c(1),] %>%
          ))
 
 summary(comp_2019)
+```
 
+For 2020 we also will extract programming language trends so that we can answer part 5 of our problem.
+
+```{r, echo = TRUE}
 comp_2020 <- data_2020[-c(1),] %>%
   filter((Q24 != "") & 
            (Q24 != "I do not wish to disclose my approximate yearly compensation") &
@@ -282,10 +299,23 @@ comp_2020 <- data_2020[-c(1),] %>%
            Degree == "Professional degree" ~ "Professional Degree",
            Degree == "I prefer not to answer" ~ "Unknown",
            TRUE ~ Degree
-         )) %>%
+         ), 
+         Python = na_if(Q7_Part_1,""),
+         R = na_if(Q7_Part_2,""), 
+         Sql = na_if(Q7_Part_3,""), 
+         C = na_if(Q7_Part_4,""), 
+         Cpp = na_if(Q7_Part_5,""), 
+         Java = na_if(Q7_Part_6,""),
+         Javascript = na_if(Q7_Part_7,""), 
+         Julia = na_if(Q7_Part_8,""),
+         Swift = na_if(Q7_Part_9,""), 
+         Bash = na_if(Q7_Part_10,""), 
+         MATLAB = na_if(Q7_Part_11,""), 
+         NoLanguage = na_if(Q7_Part_12,"")) %>%
   separate(Q24, c("MinComp", "MaxComp"), "-") %>%
   select(Job, JobCategory, Degree, EducationLevel, CodingDuration,
-         CompensationRange, MinComp, MaxComp) %>%
+         CompensationRange, MinComp, MaxComp, Python, R, Sql, C, Cpp, Java,
+         Javascript, Julia, Swift, Bash, MATLAB, NoLanguage) %>%
   mutate(MinComp = as.numeric(MinComp), 
          MaxComp = as.numeric(MaxComp), 
          AvgComp = case_when(
@@ -294,6 +324,7 @@ comp_2020 <- data_2020[-c(1),] %>%
          ))
 
 summary(comp_2020)
+
 ```
 
 Now that we have the data in readable columns and formats we can go ahead and plot some visualizations to gain some insights. Let us focus on compensation by job and filter out statistics by grouping on that.\
@@ -462,34 +493,29 @@ codingDurationApproximation <- function(range) {
 }
 
 coding_comp_2017 <- comp_2017 %>% 
-  mutate(year = "2017", 
-         CodingApprox = codingDurationApproximation(CodingDuration), 
+  mutate(year = "2017", CodingApprox = codingDurationApproximation(CodingDuration), 
          AvgComp = Compensation) %>% 
   filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
   select(JobCategory, CodingApprox, AvgComp, year)
 coding_comp_2018 <- comp_2018 %>% 
-  mutate(year = "2018", 
-         CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
+  mutate(year = "2018", CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
   filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
   select(JobCategory, CodingApprox, AvgComp, year)
 coding_comp_2019 <- comp_2019 %>% 
-  mutate(year = "2019", 
-         CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
+  mutate(year = "2019", CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
   filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
   select(JobCategory, CodingApprox, AvgComp, year)
 coding_comp_2020 <- comp_2020 %>%
-  mutate(year = "2020", 
-         CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
+  mutate(year = "2020", CodingApprox = codingDurationApproximation(CodingDuration)) %>% 
   filter((CodingApprox > 0) & (!is.na(JobCategory))) %>%
   select(JobCategory, CodingApprox, AvgComp, year)
 
-# Bind all rows from years before building linear models
 coding_comp <- bind_rows(coding_comp_2017, 
                          coding_comp_2018, 
                          coding_comp_2019, 
                          coding_comp_2020)
 
-buildModelAndPredict <- function(df, jobCategory) {
+plotCategory <- function(df, jobCategory) {
   dfjc <- df %>% filter(JobCategory == jobCategory)  
   fit  <- lm(AvgComp ~ CodingApprox, data = dfjc)
   dfjc <- dfjc %>% 
@@ -498,10 +524,10 @@ buildModelAndPredict <- function(df, jobCategory) {
   return(dfjc)
 }
 
-dfjcs <- bind_rows(buildModelAndPredict(coding_comp, "Analyst"),
-                   buildModelAndPredict(coding_comp, "Data Scientist"),
-                   buildModelAndPredict(coding_comp, "ML Engineer"),
-                   buildModelAndPredict(coding_comp, "SW Engineer"))
+dfjcs <- bind_rows(plotCategory(coding_comp, "Analyst"),
+                   plotCategory(coding_comp, "Data Scientist"),
+                   plotCategory(coding_comp, "ML Engineer"),
+                   plotCategory(coding_comp, "SW Engineer"))
 ggplot(data = dfjcs, aes(x = CodingApprox, y = pred, color = JobCategory)) + 
   geom_line() + xlab("Coding experience in years") + ylab("Expected compensation amount")
 
@@ -513,5 +539,54 @@ The grpah conclusively proves that having years of coding experience provides si
 2. All ML Engineers, Data Scientists and SW Engineers start around same salaries and lowest paid are analysts in the beginning.
 3. Machine learning Engineers with more than 2-3 years experience tend to be paid higher and are highly sought after in industry.
 4. Data scientists are high earners too and earn consistently more than Software Engineers and Analysts.
+
+# What programming languages are used by different jobs?
+
+To assess the programming languages and their closeness to varios job profiles we will use correspondence analysis. It's a branch of multivariate analysis that allows appropriate visualization of qualitative variables spatially ie. with the help of a perception map.
+
+We will also focus on only 2020 survey for this part as the relevance of technology for preparation in next year is rapidly evolving year by year.\
+
+```{r, echo = TRUE}
+lang_df <- comp_2020 %>%
+  group_by(JobCategory) %>%
+  summarise(Python = length(which(!is.na(Python))), 
+            R = length(which(!is.na(R))), 
+            Sql = length(which(!is.na(Sql))), 
+            C = length(which(!is.na(C))),
+            Cpp = length(which(!is.na(Cpp))), 
+            Java = length(which(!is.na(Java))),
+            Javascript = length(which(!is.na(Javascript))), 
+            Julia = length(which(!is.na(Julia))), 
+            Swift = length(which(!is.na(Swift))), 
+            Bash = length(which(!is.na(Bash))), 
+            MATLAB = length(which(!is.na(MATLAB))), 
+            NoLanguage = length(which(!is.na(NoLanguage))), .groups = 'drop')
+lang_df
+
+lang_df <- lang_df[-4,-1]
+
+lang_df
+
+rownames(lang_df) <- c("Analyst", "Data Scientist", "ML Engineer", "SW Engineer")
+ca_lang_df <- ca(lang_df)
+
+ca_lang_df_2 <- as.data.frame(rbind(ca_lang_df$rowcoord, ca_lang_df$colcoord))
+ca_lang_df_2$color <- ifelse(
+  rownames(ca_lang_df_2) %in% 
+    c("Analyst", "Data Scientist", "ML Engineer", "SW Engineer"), 
+  "Job Category", "Programming language")
+
+options(repr.plot.width=11, repr.plot.height=7)
+ggplot(ca_lang_df_2, aes(Dim1, Dim2, fill = color, shape = color, color = color))+
+  geom_point(size = 3.5)+
+  geom_text_repel(aes(label = rownames(ca_lang_df_2)), size = 3)+
+  geom_hline(yintercept = 0, size = 0.3, color = "gray20")+
+  geom_vline(xintercept = 0, size = 0.3, color = "gray20")+
+  scale_color_viridis_d(option = "plasma",  begin = 0.6, end = 0.05)+
+  labs(title = "Job category and programming languages used", x = "", y = "")+
+  theme_fivethirtyeight() + theme_corr +
+  theme(axis.text = element_text(size = 0), legend.title = element_text(size = 0), 
+        legend.direction = "vertical")
+```
 
 # Conclusion

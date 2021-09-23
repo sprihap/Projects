@@ -1,12 +1,28 @@
 ---
 title: "Data science community analysis"
 #author: "Spriha Awasthi"
-date: "9/18/2021"
-output: pdf_document
+date: "9/22/2021"
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
+# Setup options and install if packages are not present to achieve reproducibility
 knitr::opts_chunk$set(echo = TRUE)
+r = getOption("repos")
+r["CRAN"] = "http://cran.us.r-project.org"
+options(repos = r)
+if (!require("scales")) install.packages("scales")
+if (!require("RColorBrewer")) install.packages("RColorBrewer")
+if (!require("ggthemes")) install.packages("ggthemes")
+if (!require("ca")) install.packages("ca")
+if (!require("factoextra")) install.packages("factoextra")
+if (!require("viridis")) install.packages("viridis")
+if (!require("ggrepel")) install.packages("ggrepel")
+if (!require("tidyverse")) install.packages("tidyverse")
 library(scales)
 library(RColorBrewer)
 library(ggthemes)
@@ -15,29 +31,27 @@ library(factoextra)
 library(viridis)
 library(ggrepel)
 library(tidyverse)
-
-# To be used for later plots
-theme_corr <- theme(legend.position = "bottom", legend.direction = "horizontal", axis.text = element_text(size = 14, colour = "gray15"), 
-                      plot.caption = element_text(color = "gray55", face = "bold", size = 9), legend.text = element_text(size = 15, colour = "gray11"),
-                      axis.title = element_text(size = 15, colour = "gray15"), legend.title = element_text(size = 14, colour = "gray5"),
-                      axis.line = element_line(size = 0.4, colour = "gray25"), panel.background = element_rect(fill = "gray91"),
-                      plot.background = element_rect(fill = "gray91"), legend.background = element_rect(fill = "gray91"),
-                      legend.key = element_rect(fill = "gray91"), plot.title = element_text(size = 19, colour = "gray15"),
-                      plot.subtitle = element_text(size = 14.5, colour = "gray42"), strip.background = element_rect(fill = "gray75"),
-                      strip.text = element_text(size = 14, colour = "gray25", face = "bold"), panel.grid.major = element_line(colour = "gray95"))
 ```
+
+---------------
+  
+# Introduction
+
+The job descriptions in data science community are diverse in terms of requirements with various titles. Moreover, evolving studies around data management have constantly evolving needs. Consequently new job profiles are opening up and its is not always straightforward to compare these roles. Significance of higher education is hard to analyze because indivudials claim to have achieved these roles through online courses/bootcamps. Through this project we strive to answer some of such questions that are relevant to our cohort as we prepare to enter the field as professionals in the next 2 years. 
+
+For our purpose we have considered the Kaggle's Annual Survey on Machine Learning and Data Science from 2017-20. The respondents are from various parts of the world and can be assumed to be a good representation of the broader community. For limiting the scope of the project, most of the analysis focuses on US respondents. Besides limiting scope it is more relevant to our cohort as well. However the study is generic and by reducing country of residence filters in feature modeling, we can extend the analysis to include international prospects. Next we discuss the specific questions we are going to analyze.
 
 # Problem Statement
 
-The purpose of this project is to analyse the data science community in following parameters:
+The purpose of this project is to analyze Kaggle's data science community and answer the following questions:
 
-1. Gender diversity in the data science and related fields
-2. Compensation distribution for different job profiles in recent years
-3. Level of education in different job descriptions across years
-4. Importance of coding experience in compensation
-5. What programming languages are used by different jobs?
+1. How is the gender diversity in the community?
+2. How does compensation trend for different job categories?
+3. Is higher education a common element for different job categories?
+4. How does coding experience effect the compensation in long run?
+5. What programming languages are more relevant for different jobs?
 
-We have used the *Kaggle Machine Learning & Data Science Survey* as data sets. The data sets are available from 2017-20 and contain more than 200 columns each year with more than 15000 respondents each year.\
+As we mentioned before, our dataset consists of the *Kaggle Machine Learning & Data Science Survey* from 2017-20. Each year survey data contains more than 200 columns with several thousand respondents. Let us load and see the dimensions of the dataset which are hosted and accessed here from github for easy reproducibility.\
 
 ```{r, echo = TRUE}
 base_url <- "https://raw.githubusercontent.com/sprihap/KaggleDatasets/master/"
@@ -56,7 +70,7 @@ data_2020 = read.csv(survey_urls[4], header = TRUE,
                      check.names = FALSE, stringsAsFactors = FALSE)
 ```
 
-Below we load the datasets as tibbles and print their dimensions.\
+The rows and columns of each year's datasets can be displayed through *nrow* and *ncol* function.\
 
 ```{r, echo = TRUE}
 nrow(data_2017)
@@ -71,9 +85,18 @@ ncol(data_2020)
 
 The data set is not consistent across years and needs careful analysis to clean and extract data relevant to our problem statement. Description of each column for years is available at our hosted datasets on github at *https://github.com/sprihap/KaggleDatasets*.\
 
-### 1. Gender diversity across the years
+# Feature modeling
 
-To analyze the gender diversity we can equate the percentage of participants as proportional to gender. We do this by using the corresponding columns in each year below.\
+Our first step is to analyze the dataset. As we saw the data has very high dimensions. We need to extract our relevant features in consistent schema and then draw visualizations to analyze. 
+
+We prepare two data frames:
+
+1. For analyzing the demography parameter like gender diversity, we consider all the respondents.
+2. For other questions we want to focus on US residents and USD incomes and hence will need to filter data.
+
+## Gender level feature model
+
+To generate gender level feature model we identify the columns that map to that in each year and then mutate to get the percentage of gender identified in different years.
 
 ```{r, echo = TRUE}
 gender_2017 <- data_2017 %>% rename(gender = GenderSelect) %>% 
@@ -112,39 +135,43 @@ gender <- gender %>%
                names_to = "year",
                values_to = "percent") %>%
   mutate(year = factor(year), gender = factor(gender))
+
+glimpse(gender)
 ```
 
-Below we plot the the histogram of the distribution and compare the percentage of males across the years.
+Now that we have gender level feature data, we will generate US residents focused features in next section.
 
-```{r, echo=TRUE}
-ggplot(data=gender, aes(x = year, y = percent, fill = gender)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  scale_fill_brewer(palette = "Pastel2") +
-  geom_text(aes(label = round(percent, 1)), vjust = -0.2, size = 3,
-            position = position_dodge(0.9))
-```
+## Compensation and other parameters feature model for US residents
 
-### 2. Compensation changes across the years
+For modeling compensation in relation to other parameters, we first try to extract the compensation of different roles in each year. This needs a significant effort on understanding the data and mapping the columns form each year to a consistent schema that we can read and analyze. As proposed before, we are going to focus on people who report their earnings in USD (2017 Survey) or are living in US (2018-20 Surveys).\
 
-Let us first try to extract the compensation of different roles in each year. This needs a significant effort on understanding the data and mapping the columns form each year to a consistent schema that we can read and analyse. We are going to focus on people who report their earnings in USD (2017 Survey) or are living in US (2018-20 Surveys).\
+This feature extraction introduces the following challenges that we tackle through cleanup:
 
-This study introduces the following challenges that we have tackled in our code:
+1. The surveys across years aren't consistent in terms of schema. Each year columns change for different attributes.
+2. The expected responses for similar questions are also different and need different processing / filtering strategies.
+3. Compensation in 2017 was collected as an absolute number but in later years was converted to a bucket selection.
+4. The job profiles are diverse across years that respondents can chose.
+5. The coding experience is also recorded as an interval and isn't directly translated to real line.
 
-1. The surveys started in 2017 aren't consistent across years. Each year columns change for different attributes.
-2. Each year the expected responses are also different and needs different processing / filtering strategies.
-3. Compensation in 2017 was collected as an absolute number but in later years was converted to a bucket selection mechanism.
+To handles these we carefully read/extract each year's relevant columns and try different techniques to reach a consistent data for jobs and compensations. We use the average of closed buckets as expected compensation and coding duration to map the intervals on real line. For buckets with no upper limit we assume 1.5 times the upper value for average for compensation.\
 
-To handles these we carefully analyze each year column and try different techniques to reach a consistent data for jobs and compensations. We also use the average of buckets as expectated compensation for comparisons. For buckets with no upper limit we assume 1.5 times the upper value for average.\
+For comparing different jobs we reduce the options by generating categories for similar job profiles. We will consider the following categories with relevance to job seekers:
 
-For comparing different job categories across years we will consider the following categories:
-
-1. Data/Business Analyst
+1. Data/Business Analyst (labeled *Analyst* in code)
 2. Data Scientist
-3. Machine Learning Engineer
-4. Software Engineer
+3. Machine Learning Engineer (labeled *ML Engineer* in code)
+4. Software Engineer (labeled *SW Engineer* in code)
 5. Others (which includes consultants, students, statistician etc.)
 
-We also map education level by their degree name to consistent strings. The original values in data contain special characters which need to be transformed for comparison and analysis.\
+A demerit of *Others* bucket is that those job categories are not significant represented individually in Kaggle's survey universe. For example, there are less than 500 statisticians and research scientists combined even though they play a significant role in evolution of field.
+
+We also needed to cleanup and map education level by their degree name to consistent strings. The original values in data contain special characters which need to be transformed for comparison and analysis.
+
+Next we extract the desired features as tibble for each year below using techniques described.\
+
+### 2017
+
+We filter the data by USD and valid compensation amounts. To find unwanted values we manually bucketed the currencies to count distinct values and filtered invalid values out.
 
 ```{r, echo=TRUE}
 
@@ -185,11 +212,17 @@ summary(comp_2017)
 
 ```
 
-We see above some outliers of reported income in USD of 9,999,999 and 2,500,000 which needs to be cleaned up.\
+At this stage, we see above some outliers of reported income in USD of 9,999,999 and 2,500,000 (possibly errors of currency conversion), which needs to be cleaned up.\
 
 ```{r, echo = TRUE}
 comp_2017 <- comp_2017 %>% filter(Compensation < 2000000)
+```
 
+### 2018 
+
+The schema of 2018 changes significantly. Users have a choice of selecting their country of residence and compensation is an interval now. Possible response options to questions like job profile, education also change. To map compensation from interval to real line we split and use the average of bucket as likely value. As proposed earlier, for unbounded intervals we compute 1.5 times the lower bound.\
+
+```{r, echo = TRUE}
 comp_2018 <- data_2018[-c(1),] %>%
   filter((Q9 != "") & 
            (Q9 != "I do not wish to disclose my approximate yearly compensation") &
@@ -229,6 +262,13 @@ comp_2018 <- data_2018[-c(1),] %>%
          )) 
 
 summary(comp_2018)
+```
+
+### 2019
+
+The variation of schema from 2018 to 2019 is not as bad but needs different values for buckets to income. There was some rewording but mostly same analysis is repeated as we did for 2018.\
+
+```{r, echo = TRUE}
 
 comp_2019 <- data_2019[-c(1),] %>%
   filter((Q10 != "") & 
@@ -270,7 +310,9 @@ comp_2019 <- data_2019[-c(1),] %>%
 summary(comp_2019)
 ```
 
-For 2020 we also will extract programming language trends so that we can answer part 5 of our problem.
+### 2020
+
+Schema still remains similar to 2019 and a similar study is repeated. However, for 2020 we also will extract programming language trends so that we can answer part 5 of our problem statement. These columns are such that each person can select and provide feedback for multiple languages and we use their responses as an indicator of relevance in their job profile.\
 
 ```{r, echo = TRUE}
 comp_2020 <- data_2020[-c(1),] %>%
@@ -324,10 +366,35 @@ comp_2020 <- data_2020[-c(1),] %>%
          ))
 
 summary(comp_2020)
-
 ```
 
-Now that we have the data in readable columns and formats we can go ahead and plot some visualizations to gain some insights. Let us focus on compensation by job and filter out statistics by grouping on that.\
+# Analysis
+
+Now that we have relevant data extracted in our feature models as tibbles, we can proceed to our analysis and discoveries.
+
+## How is the gender diversity in the community?
+
+To analyze the gender diversity we equate the percentage of participants as proportional to gender in the community. We will use the feature model extracted before. Below we plot the the histogram of the distribution and compare the percentage of males across the years.\
+
+```{r, echo=TRUE}
+ggplot(data=gender, aes(x = year, y = percent, fill = gender)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Pastel2") +
+  geom_text(aes(label = round(percent, 1)), vjust = -0.2, size = 3,
+            position = position_dodge(0.9))
+```
+
+From the graph above we see the following:
+
+1. The industry has large percentage of individuals who identify as males, even though it has slightly reduced in size to ~79% from 2019 to 2020.
+2. Females have increased in percentage by ~3% from 2019 to 2020 but still have very low representation.
+3. Nonbinary gender and those who don't want to identify is very small and less than 2% in 2020.
+
+These observations show the community has large room for growth in diversification.
+
+## Compensation changes across the years
+
+To compare compensations we focus on compensation by job and filter out statistics by grouping on it\
 
 ```{r, echo=TRUE}
 comp_by_job_2017 <- comp_2017 %>% 
@@ -397,18 +464,18 @@ ggplot(comp_by_job, aes(x = JobCategory, y = avgComp/1000, fill = year)) +
 
 The above graph shows the following:
 
-1. The data for 2018 when compensation ranges were introduced for the first time was not received well and has unexpected values which are lower than usual. People have converted their salaries in USD and put in the survey. The country of origin being USA with maximum salaries in 0-10,000 is unusual.
+1. The survey for 2018 when compensation ranges were introduced for the first time is not received well. There are unexpected values which are lower than usual. People have converted their salaries in USD from other currencies and put in the survey which has brought down the aggregated values. The country of origin being USA with data science salaries in 0-10,000 is unusual.
 2. The ML Engineer related options were not given to the surveys of 2018 and 2019. However the salaries available for 2017 and 2020 shows the field is paying very well and desirable.
-3. Close the ML Engineer roles is the Data Scientist role, which has shown consistently high compensations over the years.
-4. Other fields related to data science are not paid as high. The bucket of Other category has diverse salary ranges but not significant sample size which shows lesser jobs emerging in those categories.
+3. Close to the ML Engineer roles is the Data Scientist role, which has shown consistently high compensation over the years.
+4. Other fields related to data science are not paid as high. The bucket of *Other* category has diverse salary ranges but not significant sample size which shows lesser jobs (perhaps needing niche skills) emerging in those categories.
 
-### 3. Effect of formal education in the fields
+## Effect of formal education in the fields
 
-Next we analyse the trends of level of education of people working in the field. We will analyse the broad distribution and salaries for the different education levels from the data.
+Next we analyze the trends of level of education of people working in the field by different job categories.
 
 ```{r, echo = TRUE}
 
-generateEd <- function(df, jobCategory, yearVal) {
+generateEducationByJob <- function(df, jobCategory, yearVal) {
   ndf <- df %>% 
     filter(JobCategory == jobCategory) %>%
     group_by(EducationLevel) %>% 
@@ -422,26 +489,26 @@ generateEd <- function(df, jobCategory, yearVal) {
 }
 
 ed_by_year <- bind_rows(
-  generateEd(comp_2017, "Analyst", "2017"),
-  generateEd(comp_2017, "Data Scientist", "2017"),
-  generateEd(comp_2017, "ML Engineer", "2017"),
-  generateEd(comp_2017, "SW Engineer", "2017"),
-  generateEd(comp_2017, "Other", "2017"),
-  generateEd(comp_2018, "Analyst", "2018"),
-  generateEd(comp_2018, "Data Scientist", "2018"),
-  generateEd(comp_2018, "ML Engineer", "2018"),
-  generateEd(comp_2018, "SW Engineer", "2018"),
-  generateEd(comp_2018, "Other", "2018"),
-  generateEd(comp_2019, "Analyst", "2019"),
-  generateEd(comp_2019, "Data Scientist", "2019"),
-  generateEd(comp_2019, "ML Engineer", "2019"),
-  generateEd(comp_2019, "SW Engineer", "2019"),
-  generateEd(comp_2019, "Other", "2019"),
-  generateEd(comp_2020, "Analyst", "2020"),
-  generateEd(comp_2020, "Data Scientist", "2020"),
-  generateEd(comp_2020, "ML Engineer", "2020"),
-  generateEd(comp_2020, "SW Engineer", "2020"),
-  generateEd(comp_2020, "Other", "2020")
+  generateEducationByJob(comp_2017, "Analyst", "2017"),
+  generateEducationByJob(comp_2017, "Data Scientist", "2017"),
+  generateEducationByJob(comp_2017, "ML Engineer", "2017"),
+  generateEducationByJob(comp_2017, "SW Engineer", "2017"),
+  generateEducationByJob(comp_2017, "Other", "2017"),
+  generateEducationByJob(comp_2018, "Analyst", "2018"),
+  generateEducationByJob(comp_2018, "Data Scientist", "2018"),
+  generateEducationByJob(comp_2018, "ML Engineer", "2018"),
+  generateEducationByJob(comp_2018, "SW Engineer", "2018"),
+  generateEducationByJob(comp_2018, "Other", "2018"),
+  generateEducationByJob(comp_2019, "Analyst", "2019"),
+  generateEducationByJob(comp_2019, "Data Scientist", "2019"),
+  generateEducationByJob(comp_2019, "ML Engineer", "2019"),
+  generateEducationByJob(comp_2019, "SW Engineer", "2019"),
+  generateEducationByJob(comp_2019, "Other", "2019"),
+  generateEducationByJob(comp_2020, "Analyst", "2020"),
+  generateEducationByJob(comp_2020, "Data Scientist", "2020"),
+  generateEducationByJob(comp_2020, "ML Engineer", "2020"),
+  generateEducationByJob(comp_2020, "SW Engineer", "2020"),
+  generateEducationByJob(comp_2020, "Other", "2020")
 )
 
 ggplot(data=ed_by_year, aes(x=year, y=percent, fill=EducationLevel)) +
@@ -460,15 +527,15 @@ ggplot(data=ed_by_year, aes(x=year, y=percent, fill=EducationLevel)) +
 
 From the results above we see that:
 
-1. The industry is predominantly filled with people with Bachelors or above education.
-2. The maximum degree holders have Master's degree and for the roles of Data Scientist, ML Engineer or Other related fields (Research Scientist, Statistician, etc) there is a higher percentage of PhDs. This shows the need for Masters or PhD to be useful in the field.
+1. The industry is predominantly filled with people with Bachelors or higher education.
+2. The maximum degree holders have Master's degree and for the roles of Data Scientist, ML Engineer or Other related fields (Research Scientist, Statistician, etc) there is a higher percentage of PhDs. This shows the utility for Masters or PhD to be good in the field.
 3. The number of people with unfinished college degrees is highest for software engineering and lowest for Data Scientist positions.
 
-All these clearly establish the utility of higher education being popular for pursuing data science and related fields.
+All these clearly establish the utility of higher education being high for pursuing long term career in data science and related fields.
 
-# Part 4: Predict compensation vs year of coding experience
+## Predict compensation vs year of coding experience
 
-We will try to show how important coding experience is for different job categories by building a linear model of years of coding experience and compensation respectively. As both were collected as intervals we are going to assume a gaussian between each interval and map it to mid point on real line. This is an approximation to get a general trend and is understandably not a rigid predictor.
+We will try to show how important coding experience is for different job categories by building a linear model of years of coding experience and compensation respectively. As both were collected as intervals we are going to map it to mid point on real line. This is an approximation to get a general trend and is understandably not a rigid predictor. Meaning the trend assessment will be accurate but ranges can vary by an error margin.
 
 First, we will generate the compensations and coding experiences from previously generated *comp_20XX* data frames. We will only consider people who are working and earning for modeling purposes.\
 
@@ -478,16 +545,12 @@ codingDurationApproximation <- function(range) {
     range %in% c("Less than a year", "< 1 year", "< 1 years") ~ 0.5,
     range %in% c("1 to 2 years", "1-2 years") ~ 1.5,
     range %in% c("3 to 5 years", "3-5 years") ~ 4,
-    range == "5-10 years" ~ 7.5,
-    range == "6 to 10 years" ~ 8,
-    range == "More than 10 years" ~ 12.5,
-    range == "10-20 years" ~ 15,
-    range == "20+ years" ~ 22.5,
-    range == "20-30 years" ~ 25,
+    range %in% c("5-10 years","6 to 10 years") ~ 7.5,
+    range %in% c("More than 10 years","10-20 years") ~ 15,
+    range %in% c("20+ years","20-30 years") ~ 25,
     range == "30-40 years" ~ 35,
     range == "40+ years" ~ 42.5,
-    TRUE ~ 0
-  )
+    TRUE ~ 0)
   
   return(value)
 }
@@ -535,14 +598,14 @@ ggplot(data = dfjcs, aes(x = CodingApprox, y = pred, color = JobCategory)) +
 
 The grpah conclusively proves that having years of coding experience provides significant gains in career and compensation. The analysis highlights that:
 
-1. With more years of experience the compensation is expected to grow. This does not include outlier companies but on market level expectations.
+1. With more years of experience the compensation is expected to grow. This does not include outlier companies but a trend on market level expectations.
 2. All ML Engineers, Data Scientists and SW Engineers start around same salaries and lowest paid are analysts in the beginning.
 3. Machine learning Engineers with more than 2-3 years experience tend to be paid higher and are highly sought after in industry.
-4. Data scientists are high earners too and earn consistently more than Software Engineers and Analysts.
+4. Data scientists are high earners too and earn consistently more than Software Engineers and Analysts in long run.
 
-# What programming languages are used by different jobs?
+## What programming languages are used by different jobs?
 
-To assess the programming languages and their closeness to varios job profiles we will use correspondence analysis. It's a branch of multivariate analysis that allows appropriate visualization of qualitative variables spatially ie. with the help of a perception map.
+To assess the programming languages and their closeness to various job profiles we will use correspondence analysis. It's a branch of multivariate analysis that allows appropriate visualization of qualitative variables spatially ie. with the help of a perception map.
 
 We will also focus on only 2020 survey for this part as the relevance of technology for preparation in next year is rapidly evolving year by year.\
 
@@ -561,12 +624,8 @@ lang_df <- comp_2020 %>%
             Bash = length(which(!is.na(Bash))), 
             MATLAB = length(which(!is.na(MATLAB))), 
             NoLanguage = length(which(!is.na(NoLanguage))), .groups = 'drop')
-lang_df
 
 lang_df <- lang_df[-4,-1]
-
-lang_df
-
 rownames(lang_df) <- c("Analyst", "Data Scientist", "ML Engineer", "SW Engineer")
 ca_lang_df <- ca(lang_df)
 
@@ -576,6 +635,7 @@ ca_lang_df_2$color <- ifelse(
     c("Analyst", "Data Scientist", "ML Engineer", "SW Engineer"), 
   "Job Category", "Programming language")
 
+# Theme picked from stackoverflow.com and adapted for our problem
 options(repr.plot.width=11, repr.plot.height=7)
 ggplot(ca_lang_df_2, aes(Dim1, Dim2, fill = color, shape = color, color = color))+
   geom_point(size = 3.5)+
@@ -584,9 +644,40 @@ ggplot(ca_lang_df_2, aes(Dim1, Dim2, fill = color, shape = color, color = color)
   geom_vline(xintercept = 0, size = 0.3, color = "gray20")+
   scale_color_viridis_d(option = "plasma",  begin = 0.6, end = 0.05)+
   labs(title = "Job category and programming languages used", x = "", y = "")+
-  theme_fivethirtyeight() + theme_corr +
-  theme(axis.text = element_text(size = 0), legend.title = element_text(size = 0), 
-        legend.direction = "vertical")
+  theme_fivethirtyeight() +
+  theme(legend.position = "bottom", 
+        legend.direction = "vertical", 
+        legend.key = element_rect(fill = "gray91"), 
+        legend.text = element_text(size = 10, colour = "gray11"), 
+        legend.title = element_text(size = 0),
+        legend.background = element_rect(fill = "gray91"),
+        axis.text = element_text(size = 0),
+        axis.title = element_text(size = 10, colour = "gray15"),
+        axis.line = element_line(size = 0.4, colour = "gray25"),
+        plot.caption = element_text(color = "gray55", face = "bold", size = 9), 
+        plot.background = element_rect(fill = "gray91"),
+        plot.title = element_text(size = 14, colour = "gray15"),
+        plot.subtitle = element_text(size = 10, colour = "gray42"),
+        strip.background = element_rect(fill = "gray75"),
+        strip.text = element_text(size = 10, colour = "gray25", face = "bold"), 
+        panel.grid.major = element_line(colour = "gray95"),
+        panel.background = element_rect(fill = "gray91"))
 ```
 
+The figure brings out the following observations:
+
+1. Software engineers and data science professionals don't really use the same programming languages. While former has more closeness to C/C++/Java/Swift/Javascript, the latter has more closeness to Python/R/SQL, etc. SQL though commonly underlies in Software engineering too, is more directly interacted by data science professionals.
+2. ML Engineers use more bash programming and python than R. Data scientists seem to be close to Python, R and SQL more than ML Engineers. 
+3. Analysts seem to be more close to data scientists for programming languages and could reflect fade lines between the active job tools even though the analysts salaries are expected to be lower.
+
+# Possible biases
+
+The analysis can have errors due to biases in data collection and filtering strategies used. Some of them possibly are:
+
+1. The data is from one platform's survey. Even though it seems large, there are niche jobs such as Researchers and Statisticians who are not well represented. This hides the trends of some crucially related job profiles in data science.
+2. Software engineers from large scale infrastructure companies could also not be well represented here. We expect the software engineers who participated in Kaggle's survey are those who work at an intersection of data science and engineering. Consequently, the compensation comparisons for niche engineers could be completely different. 
+3. The authenticity of data (salaries, years of experience, etc.) is not verifiable and would bring in errors. This would also bring in bias to our study.
+
 # Conclusion
+
+We have analysed *Kaggle Machine Learning & Data Science Survey* from 2017-20 in this report. The analysis talks about the cleaning strategies used and the data parameters. To answer the questions we use data visualizations and bring out findings. We see the need for community to grow in terms of gender diversity. The compensation trends show the data science professionals to be doing well and the upside trends seems likely to continue. We also see that contrary to exceptions who claim success in data science field through no higher education, most people do hold a graduate level degree. Next, we have conclusively shown the importance of programming experience on each job profile and compared them across. Through correspondence analysis, we show the programming languages that are more relevant for data science professionals. Lastly, we talk about possible biases involved. However, even with the described biases, we do believe the market trends at national level would hold up. The values may move up or down due to errors, but the general trends seem aligned with some of the expectations in real world.

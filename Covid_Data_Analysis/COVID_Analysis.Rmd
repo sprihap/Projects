@@ -1,0 +1,380 @@
+---
+title: "Role of vaccinations in COVID19 pandemic: analysis of trends and performance by US States"
+subtitle: "(DTSC 5301-001 Assignment)"
+author: "Spriha Awasthi"
+output: 
+  pdf_document:
+    toc: TRUE
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+r = getOption("repos")
+r["CRAN"] = "http://cran.us.r-project.org"
+options(repos = r)
+if (!require("lubridate")) install.packages("lubridate")
+if (!require("tidyverse")) install.packages("tidyverse")
+library(lubridate)
+library(tidyverse)
+```
+
+***
+
+# Problem statement
+
+For the purpose of the assignment we want to analyze and answer the following questions:
+
+1. Which country has performed best in terms of cases per million population?
+2. Which US state has performed best in terms of cases per million population?
+3. What is the role of vaccination on daily new cases?
+
+# Dataset attributes
+
+## Description and sources
+
+We will be using Github pages of following official accounts and data provided:
+
+1. [*CSSEGISandData*](https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data): the link contains the data from Johns Hopkins as primary source. There are 5 different CSV files we will use. The data from each file we will use is as follows:
+
+    a. [*time_series_covid19_confirmed_global.csv*](https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv) - we extract the timeseries by date of COVID19 cases for different countries from this file.
+    b. [*time_series_covid19_deaths_global.csv*](https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv) - we extract the timeseries by date of deaths due to COVID19 for different countries from this file.
+    c. [*time_series_covid19_confirmed_US.csv*](https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv) - here we extract the timeseries by date of COVID19 cases along with the total population for different states in the US.
+    d. [*time_series_covid19_deaths_US.csv*](https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv) - we extract the timeseries of deaths due to COVID19 for different states in the US from this file.
+    e. [*UID_ISO_FIPS_LookUp_Table.csv*](https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv) - the first file does not provide the population of the countries that we will need to compute cases/deaths per 1000. So we use this file to provide us the population by countries.
+
+2. [*BloombergGraphics*](https://github.com/BloombergGraphics/covid-vaccine-tracker-data): this official account of Bloomberg covers vacccination data all U.S. states, territories and several countries, on a daily basis. Data has been gathered from government websites, official statements, Bloomberg interviews and third-party sources including the World Health Organization, Johns Hopkins University and Our World In Data.
+
+    a. [historical-usa-doses-administered.csv](https://github.com/BloombergGraphics/covid-vaccine-tracker-data/blob/master/data/historical-usa-doses-administered.csv) - contains the timeseries of daily total vaccinations achieved by date for different states. There are several dates missing so will need cleanup and filling.
+
+3. [*CivilServiceUSA*](https://github.com/CivilServiceUSA/us-governors/tree/master/us-governors/data): This account maintains a variety of political data for US. We will use one table to get state names to codes mapping. We could have hard coded it but using this official dataset ensures its reproducible and adapts to future changes.
+
+    a. [us-governors.csv](https://github.com/CivilServiceUSA/us-governors/blob/master/us-governors/data/us-governors.csv) - the state codes and names are drawn from this file.
+
+## Dataset dimensions
+
+Let us now load the dataset and observe the dimensions. Here we will also rename some columns to be more coherent across data files.\
+
+```{r, echo=TRUE, results = 'asis'}
+# Some formatted strings to create URLs
+base_cssegi_uri <- str_c("https://raw.githubusercontent.com/CSSEGISandData/",
+                         "COVID-19/master/csse_covid_19_data/")
+file_names <- c("csse_covid_19_time_series/time_series_covid19_confirmed_global.csv",
+                "csse_covid_19_time_series/time_series_covid19_deaths_global.csv",
+                "csse_covid_19_time_series/time_series_covid19_confirmed_US.csv",
+                "csse_covid_19_time_series/time_series_covid19_deaths_US.csv")
+urls <- str_c(base_cssegi_uri, file_names)
+
+# Load cases and deaths globally and in US.
+global_cases <- read.csv(urls[1], header = TRUE, check.names = FALSE)
+global_deaths <- read.csv(urls[2], header = TRUE, check.names = FALSE)
+US_cases <- read.csv(urls[3], header = TRUE, check.names = FALSE)
+US_deaths <- read.csv(urls[4], header = TRUE, check.names = FALSE)
+
+# Load countries' populations.
+uid_lookup_url <- str_c(base_cssegi_uri, "UID_ISO_FIPS_LookUp_Table.csv")
+uid <- read.csv(uid_lookup_url, header = TRUE, check.names = FALSE) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+# Load vaccination data for US states.
+us_vac_url <- str_c("https://raw.githubusercontent.com/BloombergGraphics/covid-vaccine-",
+                    "tracker-data/master/data/historical-usa-doses-administered.csv")
+us_vac <- read.csv(us_vac_url, header = TRUE, check.names = FALSE)
+us_vac <- rename(us_vac, state_code = id, vaccinations = value)
+
+# Load political affiliation data for US states.
+us_political_url = str_c("https://raw.githubusercontent.com/CivilServiceUSA/us-governors/",
+                         "master/us-governors/data/us-governors.csv")
+us_states_codes_names = read.csv(us_political_url, header = TRUE, check.names = FALSE)
+us_states_codes_names <- rename(us_states_codes_names, Province_State = state_name) %>% 
+  select(Province_State, state_code)
+
+nrow(global_cases)
+ncol(global_cases)
+nrow(global_deaths)
+ncol(global_deaths)
+nrow(US_cases)
+ncol(US_cases)
+nrow(US_deaths)
+ncol(US_deaths)
+nrow(uid)
+ncol(uid)
+nrow(us_vac)
+ncol(us_vac)
+nrow(us_states_codes_names)
+ncol(us_states_codes_names)
+```
+
+# Prepare dataframes for feature modeling
+
+## Expanding and merging deaths/cases into one timeseries
+
+One thing we noticed in previous section was high number of columns in the cases and deaths related files. This is because rows represent the region and columns represent the dates. So for each new date of data, a new column is added. To facilitate plotting a timeseries and comparing region to region on a given date we will use *pivot_longer* method to increase the rows but reduce the columns. This will map all date columns into a single column of *date* and the corresponding value in a new column for *cases* or *deaths*.
+
+While expanding we also remove the columns we don't need and rename a few for better understanding and being coherent with others.\
+
+```{r, echo = TRUE}
+global_cases <- global_cases %>%
+  pivot_longer(cols = -c(`Province/State`,
+                         `Country/Region`, Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat,Long))
+
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c(`Province/State`,
+                         `Country/Region`, Lat, Long),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat, Long))
+
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to ="deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+```
+
+Next let us merge the 2 global tiblles and 2 US tibbles into 1 which facilitates plotting later on to analyse. We will also filter the entries that have zero cases and zero population regions in US as it doesn't not add value and should be cleaned up. We will also map date string column values to date type objects for comparisons and consistency.\
+
+```{r, echo = TRUE}
+# Merge cases and deaths into one by joining and convert string into date type column
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = `Country/Region`,
+         Province_State = `Province/State`) %>%
+  mutate(date = mdy(date)) %>% 
+  filter(cases > 0)
+
+# Join and add deaths/cases per million for comparison purposes.
+global <- global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  filter(Population > 0) %>%
+  select(-c(UID, FIPS)) %>%
+  select(Province_State, Country_Region, date, cases, deaths, Population)
+
+# Join deaths and cases into one table and remove all that have zero Population
+US <- US_cases %>%
+  full_join(US_deaths) %>%
+  filter(Population > 0)
+```
+
+At this stage the *global* dataframe contains the timeseries of deaths and cases for countries. We will use this later in data visualization. Below is its summary printed out for understanding.\
+
+```{r, echo=TRUE}
+summary(global)
+```
+
+## Modeling country level and state level data for US
+
+Next, we focus in generating state level data for our analysis. For our analysis we need a more comprehensive tied data of US by states which captures the cases, deaths, population and vaccinations. The vaccinations and data are obtained by joining the Bloomberg Organization's github page\
+
+```{r, echo=TRUE}
+# Group by state/country/date, sum relevant metric and add a new per million deaths and cases.
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), 
+            deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  select(Province_State, Country_Region, date, cases, deaths, Population) %>%
+  ungroup()
+
+```
+
+Before we join we will convert the date string column in vaccinations series into date object for smoothly joining differently formatted date in John Hopkin's data. We will also add cases and deaths per million population to be able to compare rates of cases and deaths.
+
+We do observe here that the data from Bloomberg did not repeat dates if the new data was not available. So we need to fill the missing values such that for each state the missing value on date is filled with previous date's value. After that we replace all NA values with zero as the vaccinations did not start much later than COVID19 cases started.\
+
+```{r, echo = TRUE}
+# Convert for joining correctly
+us_vac <- us_vac %>% mutate(date = ymd(date))
+
+US_by_state <- US_by_state %>% 
+  left_join(us_states_codes_names) %>% 
+  left_join(us_vac) %>% 
+  group_by(Province_State) %>%
+  fill(vaccinations) %>%
+  ungroup() %>%
+  mutate_at(c("vaccinations"), ~replace(., is.na(.), 0))
+```
+
+Now that we have data by state we can compute the total for the US by each date through grouping on {country, date} and summing on each group to generate the cases, deaths, vaccinations and populations. We will also use *lag* method to generate new columns for US_by_state and US_totals to generate new cases, deaths, vaccinations each date.\
+
+```{r, echo = TRUE}
+US_totals <- US_by_state %>%
+  group_by(Country_Region, date) %>%
+  summarize(cases = sum(cases), 
+            deaths = sum(deaths),
+            vaccinations = sum(vaccinations),
+            Population = sum(Population)) %>%
+  select(Country_Region, date, vaccinations, cases, deaths, Population) %>%
+  ungroup()
+
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths),
+         new_vaccinations = vaccinations - lag(vaccinations))
+
+US_totals <- US_totals %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths),
+         new_vaccinations = vaccinations - lag(vaccinations))
+
+summary(US_by_state)
+summary(US_totals)
+```
+
+Finally, we have generated the data frames needed for our analysis and we will plot some visualizations for analysis.
+
+# Data visualizations and analysis
+
+Next we answer the questions we set out in the beginning:
+
+## Which country has performed best in terms of cases per million population?
+
+We will group by coutry and compute the top 3 best performing countries by this metric.
+
+```{r, echo = TRUE}
+country_totals <- global %>%
+  group_by(Country_Region) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            population = max(Population),
+            cases_per_mil = 1000000 * cases / population) %>%
+  filter(cases > 0, population > 0)
+country_totals %>%
+  slice_min(cases_per_mil, n = 5)
+```
+
+The findings show that best performing countries are Pacific Ocean island nations. A possible explanation could be that they are not easily connected and were able to contain. The best nation in this metric is Micronesia. However there could be misrepresentations as well and the actual number could be higher. Tanzania's rank in top 5, however, raises some questions as it is well connected and should have higher cases.
+
+## Which US state has performed best in terms of cases per million population?
+
+```{r, echo = TRUE}
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            population = max(Population),
+            cases_per_thou = 1000* cases / population,
+            deaths_per_thou = 1000 * deaths / population) %>%
+  filter(cases > 0, population > 0)
+US_state_totals %>%
+  slice_min(deaths_per_thou, n = 5)
+```
+
+Similar to analysis of countries, the US states that performed best were isolated and island states. The best province is Northern Mariana Islands and best mainland state was Vermont.
+
+## What is the role of vaccination on daily new cases?
+
+Now that we have created and loaded our data into tibbles we will plot some visualizations to observe the progress of cases globally and in US.  
+
+```{r, echo = TRUE, warning = FALSE}
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "Cases")) +
+  geom_point(aes(color = "Cases")) +
+  geom_line(aes(y = deaths, color = "Deaths")) +
+  geom_point(aes(y = deaths, color = "Deaths")) +
+  geom_line(aes(y = vaccinations, color = "Total Vaccinations")) +
+  geom_point(aes(y = vaccinations, color = "Total Vaccinations")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 cases/deaths/vaccinations in US", y= NULL)
+
+state <- "Colorado"
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "Cases")) +
+  geom_point(aes(color = "Cases")) +
+  geom_line(aes(y = deaths, color = "Deaths")) +
+  geom_point(aes(y = deaths, color = "Deaths")) +
+  geom_line(aes(y = vaccinations, color = "Total Vaccinations")) +
+  geom_point(aes(y = vaccinations, color = "Total Vaccinations")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 cases/deaths/vaccinations in ", state), y= NULL)
+
+US_totals %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "New Cases")) +
+  geom_point(aes(color = "New Cases")) +
+  geom_line(aes(y = new_deaths, color = "New Deaths")) +
+  geom_point(aes(y = new_deaths, color = "New Deaths")) +
+  geom_line(aes(y = vaccinations, color = "Total Vaccinations")) +
+  geom_point(aes(y = vaccinations, color = "Total Vaccinations")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 new cases/new deaths/vaccinations in US", y= NULL)
+
+US_by_state %>%
+  filter(Province_State == state) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "New Cases")) +
+  geom_point(aes(color = "New Cases")) +
+  geom_line(aes(y = new_deaths, color = "New Deaths")) +
+  geom_point(aes(y = new_deaths, color = "New Deaths")) + 
+  geom_line(aes(y = vaccinations, color = "Total Vaccinations")) +
+  geom_point(aes(y = vaccinations, color = "Total Vaccinations")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 new cases/new deaths/vaccinations in ", state), y= NULL)
+```
+
+Take note of two observations above:
+
+1. The vaccines are launched in December 2020 in the US. Colorado is one of the early adopters of vaccines as it maps to first date of vaccinations in US. 
+2. As the total number of vaccinations have increased, daily new cases have reduced till July 2022. They start increasing gradually after this due to the Delta variant outbreak. However, the rate of increase could have been catastrophic in the absence of vaccinations like in early pandemic.
+
+To establish a quantitative relationship between daily new cases and vaccinations, we will build a linear model on total vaccinated vs number of daily new cases. We want to model total vaccinations instead of daily new vaccinations as the new cases are likely impacted by total vaccinated population and not just by new vaccinations.We also need to normalize the columns as there is considerable order difference between the 2 quantities.
+
+```{r, echo = TRUE}
+vaccinations_data <- US_totals %>%
+  filter((!is.na(vaccinations)) & (!is.na(new_cases))) %>%
+  mutate(vacc = (vaccinations - min(vaccinations))/(max(vaccinations) - min(vaccinations)),
+         nCas = (new_cases - min(new_cases))/(max(new_cases) - min(new_cases))) %>%
+  select(vacc, nCas)
+
+lmodel_cases <- lm(vacc ~ nCas, data = vaccinations_data)
+summary(lmodel_cases)
+
+vaccinations_data <- vaccinations_data %>% 
+  mutate(pred_cases = predict(lmodel_cases))
+
+vaccinations_data %>% ggplot(aes(x = vacc)) +
+  geom_point(aes(y = nCas, color = "New Cases")) +
+  geom_line(aes(y = pred_cases, color = "Predicted Cases"))
+
+```
+
+The graph shows the partially negative slope of new cases with vaccines increase and hence establishes their importance in containing COVID19 pandemic. The graph, however, has kinks and irregularities due to data getting skewed after the delta variant outbreak.
+
+# Bias
+
+The findings above align with expectations but its worth calling out that there are biases involved at several places. Some of these are as follows:
+
+1. Data collection is done from diverse sources. Accuracy of sources, specially international values are untrustworthy.
+2. The number of cases in some places might be under reported because of political reasons
+3. The number of deaths may not be exact as the death of the people suffering from prior health conditions may not be reported as a COVID19 death.
+4. The Parameters for reporting of the cases, deaths and vaccines for different countries might not be same
+5. The events may not be reported on the day of its occurrence.
+
+# Conclusion
+
+We have performed analysis above to find best country and best US state in terms of COVID cases per million population. Micronesia is the best performing country in this metric and within US, the best province is Northern Mariana Islands with best mainland state being Vermont. The findings on role of vaccine makes it clear how they help contain pandemic. We saw daily new cases reducing with more vaccines being distributed till the delta outbreak. We have also discussed some biases in the data involved.

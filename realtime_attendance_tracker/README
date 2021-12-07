@@ -1,0 +1,24 @@
+1. Install pyenv and install python 3.8.12 (https://github.com/pyenv/pyenv for your environment)
+	1a. brew install pyenv
+	1b. echo 'eval "$(pyenv init --path)"' >> ~/.zprofile
+	1c. echo 'eval "$(pyenv init -)"' >> ~/.zshrc
+2. Make project directory and setup venv
+	2a. mkdir ~/Project
+	2b. cd Project
+	2c. pyenv local 3.8.12
+	2d. python -m venv venv
+	2e. source ./venv/bin/activate
+	2f. deactivate (when done)
+3. Install tools to build and setup dlib - cmake
+	3a. brew install cmake
+	3b. pip install numpy
+	3c. pip install opencv-contrib-python
+	3c. pip install dlib
+	3c. pip install --upgrade imutils
+	3f. pip install face_recognition
+	3g. pip install matplotlib
+	3g. install.packages('reticulate')
+	3g. reticulate::install_miniconda()
+	pip install sklearn
+	pip install scikit-image
+

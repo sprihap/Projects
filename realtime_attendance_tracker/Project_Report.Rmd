@@ -27,7 +27,7 @@ The problem of marking a student as present or absent can be broken down as foll
 
 1. Capture a frame in video stream of class
 2. Detect and recognize faces in the frame from known faces of students in class
-3. IF sufficient frames detect a person's face, mark their attendance as present.
+3. If sufficient frames detect a person's face, mark their attendance as present.
 
 This can be seen as a binomial problem with success being the student's attendance correctly recorded and failure being incorrectly recorded. Each trial in this distribution is a Bernoulli event of frame detection being correct which has success probaility 'p' as the accuracy of the model being used to detect and recognize face in the frame. 
 
@@ -35,11 +35,11 @@ If we say that total 'N' frames are processed, then we can define attendance as 
 ```
 if person A is detected in > d% of N frames:
 		Mark them present
-Else:
+else:
 		Mark them absent
 ```
 
-Thus,if 1000 frames are processed and, d = 10, then if person A is detected in 101 frames they are marked present, else absent. By this approach of modeling entire process as a Binomial distribution the probability of a student's attendance being incorrectly marked becomes extremely low.
+Thus, if 1000 frames are processed and, d = 10, then if person A is detected in 101 frames they are marked present, else absent. By this approach of modeling entire process as a Binomial distribution the probability of a student's attendance being incorrectly marked becomes extremely low.
 
 
 For example, if d = 10%, then absent is recorded if 90% or more frames fail to detect.
@@ -66,6 +66,19 @@ Let us now focus on each frame processing. Each frame will involve face detectio
 
 ![alt text](./docs/face-recognition-pipeline.png)
 
+## Datasets evaluation
+
+There are different kinds of datasets at play in this project. The different classifiers each have different datasets as described below. A custom class specific dataset is created for real time attendance generation. Broadly there are 2 separate sections in which we are using different datasets: during different models of face detection and during facial features matching for recording attendance.
+
+For face detection datasets and models, the Haar wavelets are not strictly based on any dataset but provided through OpenCV package. For the Histogram of Gradient + SVM approach we use trained models on the ibug 300-W dataset [https://ibug.doc.ic.ac.uk/resources/facial-point-annotations/](https://ibug.doc.ic.ac.uk/resources/facial-point-annotations/). 
+
+Lastly, Histogram of Gradient + CNN model uses ResNet network with 29 convolution layers. The network was trained from scratch on a dataset of about 3 million faces. This dataset is derived from a number of datasets. The face scrub dataset [http://vintage.winklerbros.net/facescrub.html](http://vintage.winklerbros.net/facescrub.html), the VGG dataset [http://www.robots.ox.ac.uk/~vgg/data/vgg_face/](http://www.robots.ox.ac.uk/~vgg/data/vgg_face/).
+
+The real time face recognition is done by training on custom class specific dataset where the each student is represented by a folder with their name in the train/ folder. For example, train/Spriha/*.jpg would represent facial images for person named Spriha in the class. The training phase would generate the 128 dimension vector for each of these images per person and the 128 dimension cluster is formed for each person in the training dataset.
+
+Each of the datasets is abiding by the FAIR principles. The datasets hosted at the links mentioned are findable at the hosted URLs. Except for the class specific data which is private to users and hosted/controlled by the administrator for personally identifiable data. They are also accessible as all but last are accessible at the hosted URLs without authentication. The class specific data is controlled by admin user’s passwords.They are also interoperable and reusable as they are well documented and have fixed structure to be reused for different applications in different applications.
+
+
 ## Face detection
 
 Face detection is a classical problem which has many established algorithms. We will consider a few classical ones and few more recent deep learning based approaches. For our use case, we want to pick an approach that is accurate but also fast enough to be executed in real time.
@@ -80,14 +93,15 @@ For our project, we have tested the following face recognition algorithms:
 
 This method revolutionized face detection on devices. The method is blazing fast (e.g. on Macbook pro 15inc we have 38ms average frame per second processing) but less accurate (as low as 85% on local image set) as many false positives were detected while its implementation. It is a machine learning based approach where a cascade function is trained from a lot of positive and negative images. It is then used to detect objects in other images.
 
-![alt text](./docs/haar.jpeg)
+![](./docs/haar.jpeg)
 
 Haar Cascade being legacy algorithm require some advanced detection techniques with higher accuracy. To deal with lower accuracy and false positives of Haar, we will use HOG based SVM and CNN models provided by DLib open source tool.
 
 ### 2) Histogram of gradients (HOG)
 
 To find HOG of a frame in an image, we’ll start by converting our colored image to gray scale because we don’t need color data to find gradients for our use case. Lets start with the image below of Will Ferrel.
-![alt text here](./docs/will_gray.jpeg){width=40%}
+
+![](./docs/will_gray.jpeg){width=40%}
 
 Then we’ll look at every single pixel in our image one at a time. For every single pixel, we want to look at the pixels that directly surrounding it to compute gradient. Our goal is to figure out how dark the current pixel is compared to the pixels directly surrounding it. Then we want to draw an arrow showing in which direction the image is getting darker. Example in images below.
 
@@ -111,7 +125,7 @@ The end result is we turn the original image into a very simple representation t
 
 To find faces in this HOG image, all we have to do is find the part of our image that looks the most similar to a known HOG pattern that was extracted from a bunch of other training faces:
 
-![alt text here](./docs/hog_face_pattern.png){width=60%}
+![](./docs/hog_face_pattern.png){width=60%}
 
 | 68 Face landmarks | Observed results |
 |:--------------:|:------------------------:|
@@ -146,11 +160,11 @@ python find_faces_in_picture_cnn.py
 
 The results of running the above code on 2 images is as below:
 
-| Original Image | Faces detected with HOG |
+| Original Image | Faces detected with HOG + SVM works |
 |:--------------:|:------------------------:|
 | ![](./friends_banner1.jpg){width=50%} | ![](./friends_faces.jpg){width=50%} |
 
-| Faces with HOG+SVM | Faces with HOG+CNN |
+| Faces with HOG+SVM less accurate| Faces with HOG+CNN wins |
 |:--------------:|:------------------------:|
 | ![](./docs/HOG_SVM.jpeg){width=50%} | ![](./docs/HOG_CNN.jpeg){width=50%} |
 
@@ -228,7 +242,7 @@ The above code was demonstrated in class and is consolidated here for simplicity
 
 ## Other resources & references
 
-The project is hosted at https://github.com/sprihap/Projects and also contains other scripts used for generating and comparing results we have discussed. We have used extensively several opensource project resources and want to acknowlege their immense contribution to learning:
+The project is hosted at https://github.com/sprihap/Projects/tree/master/realtime_attendance_tracker and also contains other scripts used for generating and comparing results we have discussed. We have used extensively several opensource project resources and want to acknowlege their immense contribution to learning:
 
 1. OpenCV (https://opencv.org/)
 2. Dlib (http://dlib.net/)
